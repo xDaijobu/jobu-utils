@@ -1,6 +1,8 @@
-# Cache Package - High Performance Redis Cache Utilities
+# Jobu Utils - High Performance Cache Package
 
 A highly optimized Redis caching package for Go applications with focus on performance and ease of use.
+
+> **"Setiap milidetik sangat berharga"** - Every millisecond counts
 
 ## 🚀 Performance Features
 
@@ -19,11 +21,12 @@ A highly optimized Redis caching package for Go applications with focus on perfo
 - [Configuration](#configuration)
 - [Testing](#testing)
 - [Performance Metrics](#performance-metrics)
+- [Docker Support](#docker-support)
 
 ## 🔧 Installation
 
 ```bash
-go get github.com/your-org/jobu-utils/cache
+go get github.com/xDaijobu/jobu-utils
 ```
 
 ## 🚀 Quick Start
@@ -46,7 +49,7 @@ package main
 
 import (
     "fmt"
-    "github.com/your-org/jobu-utils/cache"
+    "github.com/xDaijobu/jobu-utils/cache"
 )
 
 type User struct {
@@ -94,8 +97,22 @@ func main() {
 
 ### Prerequisites
 
-1. **Go 1.13+** installed
+1. **Go 1.25+** installed
 2. **Redis server** running (optional for benchmarks)
+
+### Quick Benchmark Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/xDaijobu/jobu-utils.git
+cd jobu-utils
+
+# Run Redis with Docker
+docker-compose up -d redis
+
+# Run all benchmarks
+go test ./cache/... -bench=. -benchmem -v
+```
 
 ### Running All Benchmarks
 
@@ -112,7 +129,7 @@ go test ./cache/... -bench=. -benchmem > benchmark_results.txt
 
 ### Specific Benchmark Categories
 
-#### Key Generation Benchmarks
+#### Key Generation Benchmarks (Core Optimization)
 ```bash
 # Benchmark key generation performance
 go test ./cache/... -bench=BenchmarkGetKey -benchmem -v
@@ -136,31 +153,19 @@ go test ./cache/... -bench=BenchmarkBuildRedisAddr -benchmem -v
 go test ./cache/... -bench=BenchmarkIsCacheConnected -benchmem -v
 ```
 
-#### Cache Operations Benchmarks
+#### Cache Operations Benchmarks (With Redis)
 ```bash
-# Benchmark JSON marshaling
-go test ./cache/... -bench=BenchmarkJSONMarshal -benchmem -v
+# Ensure Redis is running first
+docker-compose up -d redis
 
-# Benchmark JSON unmarshaling
-go test ./cache/... -bench=BenchmarkJSONUnmarshal -benchmem -v
-
-# Benchmark duration conversions
-go test ./cache/... -bench=BenchmarkDurationConversion -benchmem -v
-```
-
-### With Redis Integration
-```bash
-# Start Redis server first
-docker run -d -p 6379:6379 redis:alpine
-
-# Run benchmarks with Redis operations
+# Benchmark Redis operations
 go test ./cache/... -bench=BenchmarkSetJSON -benchmem -v
 go test ./cache/... -bench=BenchmarkGet -benchmem -v
 go test ./cache/... -bench=BenchmarkGetUnmarshal -benchmem -v
 go test ./cache/... -bench=BenchmarkIsCacheExists -benchmem -v
 ```
 
-### Benchmark Output Example
+### Expected Benchmark Output
 
 ```
 BenchmarkGetKey-8                    1000000    1205 ns/op    384 B/op    12 allocs/op
@@ -168,6 +173,8 @@ BenchmarkParseTagsFast-8           10000000     156 ns/op     48 B/op     1 allo
 BenchmarkIsZeroValue-8             50000000      32 ns/op      0 B/op     0 allocs/op
 BenchmarkGetRedisConfig-8         100000000      15 ns/op      0 B/op     0 allocs/op
 BenchmarkBuildRedisAddr-8          5000000     285 ns/op     32 B/op     2 allocs/op
+BenchmarkJSONMarshal-8             2000000     785 ns/op    128 B/op     2 allocs/op
+BenchmarkJSONUnmarshal-8           1000000    1120 ns/op    256 B/op     8 allocs/op
 ```
 
 ## 📖 API Reference
@@ -269,13 +276,16 @@ go test ./cache/... -v
 go test ./cache/... -cover -v
 ```
 
-### Integration Tests
+### Integration Tests with Redis
 ```bash
-# Start Redis for integration tests
-docker run -d -p 6379:6379 redis:alpine
+# Start Redis using Docker Compose
+docker-compose up -d redis
 
 # Run tests (integration tests auto-skip if Redis unavailable)
 go test ./cache/... -v
+
+# Stop Redis
+docker-compose down
 ```
 
 ### Test Categories
@@ -287,23 +297,36 @@ go test ./cache/... -v
 
 ## 📈 Performance Metrics
 
-### Before Optimization
-- Key generation: ~2000 ns/op, 800 B/op, 25 allocs/op
-- Config loading: ~500 ns/op, 128 B/op, 8 allocs/op
-- Zero checking: ~150 ns/op, 64 B/op, 3 allocs/op
-
-### After Optimization
-- Key generation: ~1200 ns/op, 384 B/op, 12 allocs/op (**40% faster**)
-- Config loading: ~15 ns/op, 0 B/op, 0 allocs/op (**97% faster**)
-- Zero checking: ~32 ns/op, 0 B/op, 0 allocs/op (**80% faster**)
-
-### Key Optimizations
+### Key Optimizations Implemented
 
 1. **Custom Zero Value Checking**: Replaced `reflect.DeepEqual` with type-specific checks
-2. **String Builder**: Eliminated multiple string concatenations
+2. **String Builder Usage**: Eliminated multiple string concatenations
 3. **Configuration Caching**: `sync.Once` pattern for environment variables
 4. **Connection Pooling**: Reuse Redis connections with proper lifecycle management
 5. **Tag Parsing Optimization**: Cached parsing results and efficient string operations
+6. **Thread-Safe Design**: `sync.RWMutex` for concurrent access optimization
+
+## 🐳 Docker Support
+
+The repository includes Docker Compose configuration for easy development and testing:
+
+### Start Redis for Development
+```bash
+docker-compose up -d redis
+```
+
+### Build and Run Application
+```bash
+# Build the application
+docker-compose build app
+
+# Run with Redis
+docker-compose up
+```
+
+### Docker Compose Services
+- **redis**: Redis server for caching
+- **app**: Your Go application (configure in docker-compose.yml)
 
 ## 🔍 Troubleshooting
 
@@ -315,27 +338,41 @@ go test ./cache/... -v
    ```
 
 2. **"redis connect failed"**
-   - Check Redis server is running: `redis-cli ping`
-   - Verify connection settings: `REDIS_HOST`, `REDIS_PORT`
+   ```bash
+   # Check Redis server
+   docker-compose ps redis
+   
+   # Check connectivity
+   redis-cli -h localhost -p 6379 ping
+   ```
 
 3. **"data cannot be empty"**
    - Add `cache:"optional"` tag for optional fields
    - Ensure required fields have non-zero values
 
+4. **Benchmark issues**
+   ```bash
+   # Clean test cache
+   go clean -testcache
+   
+   # Run with verbose output
+   go test ./cache/... -bench=. -benchmem -v
+   ```
+
 ### Debug Mode
 
 Enable verbose logging:
 ```go
-// The package logs errors automatically
-// Check console output for detailed error messages
+// The package logs errors automatically to console
+// Check application logs for detailed error messages
 ```
 
 ## 🤝 Contributing
 
-1. Fork the repository
+1. Fork the repository: [github.com/xDaijobu/jobu-utils](https://github.com/xDaijobu/jobu-utils)
 2. Create feature branch: `git checkout -b feature/amazing-feature`
 3. Add tests for new functionality
-4. Run benchmarks: `go test -bench=. -benchmem`
+4. Run benchmarks: `go test ./cache/... -bench=. -benchmem`
 5. Commit changes: `git commit -m 'Add amazing feature'`
 6. Push to branch: `git push origin feature/amazing-feature`
 7. Open Pull Request
@@ -348,16 +385,63 @@ Enable verbose logging:
 - Minimize reflection usage where possible
 - Add comprehensive test coverage
 
+### Development Setup
+
+```bash
+# Clone repository
+git clone https://github.com/xDaijobu/jobu-utils.git
+cd jobu-utils
+
+# Install dependencies
+go mod download
+
+# Start Redis for testing
+docker-compose up -d redis
+
+# Run tests
+go test ./cache/... -v
+
+# Run benchmarks
+go test ./cache/... -bench=. -benchmem
+```
+
+## 📄 Repository Structure
+
+```
+jobu-utils/
+├── cache/                  # Cache package
+│   ├── cache.go           # Core cache operations
+│   ├── connect.go         # Redis connection management
+│   ├── key.go             # Optimized key generation
+│   ├── cache_test.go      # Cache operation tests
+│   ├── connect_test.go    # Connection tests
+│   └── key_test.go        # Key generation tests
+├── docker-compose.yml     # Docker services
+├── Dockerfile            # Application container
+├── go.mod               # Go module definition
+├── go.sum               # Dependency checksums
+└── README.md            # This file
+```
+
 ## 📝 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## 🙏 Acknowledgments
 
-- Built with performance in mind: "setiap milidetik sangat berharga"
+- Built with performance in mind: **"Setiap milidetik sangat berharga"**
 - Optimized for high-throughput applications
 - Designed for production environments
+- Community-driven development
+
+## 🔗 Links
+
+- **Repository**: [github.com/xDaijobu/jobu-utils](https://github.com/xDaijobu/jobu-utils)
+- **Issues**: [github.com/xDaijobu/jobu-utils/issues](https://github.com/xDaijobu/jobu-utils/issues)
+- **Releases**: [github.com/xDaijobu/jobu-utils/releases](https://github.com/xDaijobu/jobu-utils/releases)
 
 ---
 
 **Happy Caching! 🚀**
+
+*Performance-first Redis caching for Go applications*
