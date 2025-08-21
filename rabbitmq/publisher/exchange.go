@@ -2,79 +2,136 @@ package publisher
 
 import (
 	"fmt"
-	"jobu-utils/rabbitmq"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/streadway/amqp"
+	"jobu-utils/rabbitmq"
 )
 
-// Route type Schema - now embeds the shared RouteConfig
-type Route struct {
-	rabbitmq.RouteConfig
+// Publisher represents a RabbitMQ publisher
+type Publisher struct {
+	config  *rabbitmq.RouteConfig
+	channel *amqp.Channel
+	mutex   sync.RWMutex
 }
 
-// Publish type Schema
-type Publish struct {
-	Headers amqp.Table
-	Body    string
+// Message represents a message to be published
+type Message struct {
+	Body        []byte
+	ContentType string
+	Priority    uint8
+	Headers     amqp.Table
 }
 
-var m sync.Mutex
-
-// Publish sends message to message broker
-func (route *Route) Publish(publish *Publish) error {
-	// Validate input
-	if route == nil {
-		return fmt.Errorf("route cannot be nil")
-	}
-	if publish == nil {
-		return fmt.Errorf("publish cannot be nil")
-	}
-	if route.ExchangeName == "" {
-		return fmt.Errorf("exchange name cannot be empty")
-	}
-	if route.QueueName == "" {
-		return fmt.Errorf("queue name cannot be empty")
+// NewPublisher creates a new publisher instance
+func NewPublisher(config *rabbitmq.RouteConfig) (*Publisher, error) {
+	if config == nil {
+		return nil, fmt.Errorf("config cannot be nil")
 	}
 
-	channel, err := rabbitmq.Start(&m)
+	var mutex sync.Mutex
+	channel, err := rabbitmq.Start(&mutex)
 	if err != nil {
-		log.Printf("ERROR: Failed to connect to RabbitMQ: %v", err)
-		return fmt.Errorf("failed to connect to RabbitMQ: %w", err)
+		return nil, fmt.Errorf("failed to get channel: %w", err)
 	}
 
-	// Use shared setup function - this replaces the 3 separate calls
-	if err := rabbitmq.SetupRouting(channel, &route.RouteConfig); err != nil {
-		return fmt.Errorf("failed to setup routing: %w", err)
+	// Setup routing (exchange, queue, binding)
+	if err := rabbitmq.SetupRouting(channel, config); err != nil {
+		return nil, fmt.Errorf("failed to setup routing: %w", err)
 	}
 
-	// Publish message
-	if err := route.publishMessage(channel, publish); err != nil {
+	return &Publisher{
+		config:  config,
+		channel: channel,
+	}, nil
+}
+
+// Publish sends a message to the configured exchange
+func (p *Publisher) Publish(msg *Message) error {
+	return p.PublishWithRoutingKey(msg, p.config.RoutingKey)
+}
+
+// PublishWithRoutingKey sends a message with a custom routing key
+func (p *Publisher) PublishWithRoutingKey(msg *Message, routingKey string) error {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+
+	if msg == nil {
+		return fmt.Errorf("message cannot be nil")
+	}
+
+	// Set default content type if not provided
+	contentType := msg.ContentType
+	if contentType == "" {
+		contentType = "application/json"
+	}
+
+	// Create AMQP publishing
+	publishing := amqp.Publishing{
+		ContentType:  contentType,
+		Body:         msg.Body,
+		Priority:     msg.Priority,
+		Headers:      msg.Headers,
+		Timestamp:    time.Now(),
+		DeliveryMode: amqp.Persistent, // Make messages persistent
+	}
+
+	// Publish the message
+	err := p.channel.Publish(
+		p.config.ExchangeName, // exchange
+		routingKey,            // routing key
+		false,                 // mandatory
+		false,                 // immediate
+		publishing,
+	)
+
+	if err != nil {
+		log.Printf("ERROR: Failed to publish message: %v", err)
 		return fmt.Errorf("failed to publish message: %w", err)
 	}
 
-	log.Printf("Successfully published message to exchange: %s, routing key: %s", route.ExchangeName, route.RoutingKey)
+	log.Printf("Message published to exchange '%s' with routing key '%s'",
+		p.config.ExchangeName, routingKey)
 	return nil
 }
 
-// publishMessage publishes the message to the exchange
-func (route *Route) publishMessage(channel *amqp.Channel, publish *Publish) error {
-	err := channel.Publish(
-		route.ExchangeName, // exchange name
-		route.RoutingKey,   // routing key
-		false,              // mandatory
-		false,              // immediate
-		amqp.Publishing{
-			DeliveryMode: amqp.Persistent,
-			ContentType:  "application/json",
-			Body:         []byte(publish.Body),
-			Headers:      publish.Headers,
-		},
-	)
-	if err != nil {
-		log.Printf("ERROR: Failed to publish message to exchange '%s': %v", route.ExchangeName, err)
-		return err
+// PublishJSON is a convenience method for publishing JSON messages
+func (p *Publisher) PublishJSON(data []byte) error {
+	msg := &Message{
+		Body:        data,
+		ContentType: "application/json",
+	}
+	return p.Publish(msg)
+}
+
+// PublishText is a convenience method for publishing text messages
+func (p *Publisher) PublishText(text string) error {
+	msg := &Message{
+		Body:        []byte(text),
+		ContentType: "text/plain",
+	}
+	return p.Publish(msg)
+}
+
+// PublishWithPriority publishes a message with a specific priority
+func (p *Publisher) PublishWithPriority(data []byte, priority uint8) error {
+	msg := &Message{
+		Body:        data,
+		ContentType: "application/json",
+		Priority:    priority,
+	}
+	return p.Publish(msg)
+}
+
+// Close gracefully closes the publisher
+func (p *Publisher) Close() error {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	if p.channel != nil {
+		return p.channel.Close()
 	}
 	return nil
 }

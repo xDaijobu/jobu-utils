@@ -10,7 +10,7 @@ import (
 // RouteConfig contains the basic routing configuration shared between publisher and consumer
 type RouteConfig struct {
 	ExchangeName string
-	ExchangeType string
+	ExchangeType string // direct, topic, fanout, headers
 	RoutingKey   string
 	QueueName    string
 }

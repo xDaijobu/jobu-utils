@@ -152,36 +152,46 @@ package main
 
 import (
     "log"
-    "sync"
     
     "jobu-utils/rabbitmq"
-    "github.com/streadway/amqp"
+    "jobu-utils/rabbitmq/publisher"
 )
 
 func main() {
-    var mutex sync.Mutex
-    channel, err := rabbitmq.Start(&mutex)
-    if err != nil {
-        log.Fatal(err)
+    // Configure exchange and queue
+    config := &rabbitmq.RouteConfig{
+        ExchangeName: "user-events",
+        ExchangeType: "direct",
+        RoutingKey:   "user.created",
+        QueueName:    "user-notifications",
     }
-    defer rabbitmq.InitConnectionManager().Close()
     
-    // Publish a message
-    err = channel.Publish(
-        "my-exchange",   // exchange
-        "my.key",        // routing key
-        false,           // mandatory
-        false,           // immediate
-        amqp.Publishing{
-            ContentType: "text/plain",
-            Body:        []byte("Hello, RabbitMQ!"),
-        },
-    )
+    // Create publisher
+    pub, err := publisher.NewPublisher(config)
+    if err != nil {
+        log.Fatal("Failed to create publisher:", err)
+    }
+    defer pub.Close()
     
+    // Publish JSON message
+    jsonData := []byte(`{"user_id": 123, "name": "John Doe", "email": "john@example.com"}`)
+    err = pub.PublishJSON(jsonData)
     if err != nil {
         log.Printf("Failed to publish: %v", err)
     } else {
         log.Println("Message published successfully!")
+    }
+    
+    // Publish text message
+    err = pub.PublishText("Hello, RabbitMQ!")
+    if err != nil {
+        log.Printf("Failed to publish text: %v", err)
+    }
+    
+    // Publish with priority
+    err = pub.PublishWithPriority(jsonData, 5)
+    if err != nil {
+        log.Printf("Failed to publish with priority: %v", err)
     }
 }
 ```
@@ -192,38 +202,51 @@ func main() {
 package main
 
 import (
+    "context"
     "log"
-    "sync"
+    "time"
     
     "jobu-utils/rabbitmq"
+    "jobu-utils/rabbitmq/consumer"
+    "github.com/streadway/amqp"
 )
 
 func main() {
-    var mutex sync.Mutex
-    channel, err := rabbitmq.Start(&mutex)
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer rabbitmq.InitConnectionManager().Close()
-    
-    // Consume messages
-    msgs, err := channel.Consume(
-        "my-queue", // queue
-        "",         // consumer
-        true,       // auto-ack
-        false,      // exclusive
-        false,      // no-local
-        false,      // no-wait
-        nil,        // args
-    )
-    
-    if err != nil {
-        log.Fatal(err)
+    // Configure exchange and queue
+    config := &rabbitmq.RouteConfig{
+        ExchangeName: "user-events",
+        ExchangeType: "direct",
+        RoutingKey:   "user.created",
+        QueueName:    "user-notifications",
     }
     
-    // Process messages
-    for msg := range msgs {
-        log.Printf("Received: %s", msg.Body)
+    // Create consumer
+    cons, err := consumer.NewConsumer(config)
+    if err != nil {
+        log.Fatal("Failed to create consumer:", err)
+    }
+    defer cons.Close()
+    
+    // Create message handler
+    handler := func(msg amqp.Delivery) error {
+        log.Printf("Received message: %s", string(msg.Body))
+        
+        // Process your message here
+        // Return error if processing fails (message will be requeued)
+        // Return nil if processing succeeds (message will be acked)
+        
+        time.Sleep(100 * time.Millisecond) // Simulate processing
+        return nil
+    }
+    
+    // Start consuming with context for graceful shutdown
+    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+    
+    log.Println("Starting consumer...")
+    err = cons.Consume(ctx, handler)
+    if err != nil {
+        log.Printf("Consumer error: %v", err)
     }
 }
 ```
@@ -259,11 +282,40 @@ Warning: Error loading .env file: no such file or directory
 
 ## 📚 API Reference
 
-### Functions
+### Core Functions
 
 - `Start(mutex *sync.Mutex) (*amqp.Channel, error)` - Connect and get channel
 - `InitConnectionManager() *ConnectionManager` - Get connection manager instance
 - `SetupRouting(channel *amqp.Channel, config *RouteConfig) error` - Setup exchanges and queues
+
+### Publisher API
+
+```go
+// Create new publisher
+func NewPublisher(config *RouteConfig) (*Publisher, error)
+
+// Publishing methods
+func (p *Publisher) Publish(msg *Message) error
+func (p *Publisher) PublishWithRoutingKey(msg *Message, routingKey string) error
+func (p *Publisher) PublishJSON(data []byte) error
+func (p *Publisher) PublishText(text string) error
+func (p *Publisher) PublishWithPriority(data []byte, priority uint8) error
+func (p *Publisher) Close() error
+```
+
+### Consumer API
+
+```go
+// Create new consumer
+func NewConsumer(config *RouteConfig) (*Consumer, error)
+
+// Consuming methods
+func (c *Consumer) Consume(ctx context.Context, handler MessageHandler) error
+func (c *Consumer) Close() error
+
+// Message handler function type
+type MessageHandler func(msg amqp.Delivery) error
+```
 
 ### Types
 
@@ -280,6 +332,13 @@ type RouteConfig struct {
     ExchangeType string // Exchange type: direct, topic, fanout, headers
     RoutingKey   string // Routing key pattern
     QueueName    string // Queue name
+}
+
+type Message struct {
+    Body        []byte     // Message payload
+    ContentType string     // MIME content type
+    Priority    uint8      // Message priority (0-255)
+    Headers     amqp.Table // Custom headers
 }
 ```
 
