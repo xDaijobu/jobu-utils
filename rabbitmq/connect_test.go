@@ -129,11 +129,11 @@ func TestStartIntegration(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	// Set hardcoded environment variables for the test - using admin/password from .env
+	// Hardcoded test credentials for RabbitMQ instead of using environment variables
 	os.Setenv("RABBITMQ_HOST", "localhost")
 	os.Setenv("RABBITMQ_PORT", "5672")
-	os.Setenv("RABBITMQ_USER", "admin")
-	os.Setenv("RABBITMQ_PASSWORD", "password")
+	os.Setenv("RABBITMQ_USER", "admin")        // Using test username
+	os.Setenv("RABBITMQ_PASSWORD", "password") // Using test password
 
 	var m sync.Mutex
 	channel, err := Start(&m)
@@ -163,11 +163,11 @@ func TestStartConcurrency(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	// Set hardcoded environment variables for the test
+	// Hardcoded test credentials for the test
 	os.Setenv("RABBITMQ_HOST", "localhost")
 	os.Setenv("RABBITMQ_PORT", "5672")
-	os.Setenv("RABBITMQ_USER", "admin")
-	os.Setenv("RABBITMQ_PASSWORD", "password")
+	os.Setenv("RABBITMQ_USER", "admin")        // Using test username
+	os.Setenv("RABBITMQ_PASSWORD", "password") // Using test password
 
 	var wg sync.WaitGroup
 	var m sync.Mutex

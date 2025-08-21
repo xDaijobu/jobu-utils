@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/streadway/amqp"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 func TestRouteConfigValidation(t *testing.T) {

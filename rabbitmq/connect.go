@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	"github.com/streadway/amqp"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 // ConnectionManager manages RabbitMQ connection with auto-reconnect functionality
