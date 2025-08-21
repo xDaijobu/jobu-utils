@@ -1,114 +1,158 @@
-# Jobu Utils - Go Utilities Collection
+# Jobu Utils
 
-A collection of high-performance Go utilities designed for production applications.
+A collection of high-performance Go utilities for common development tasks including caching and message queuing.
 
-> **"Setiap milidetik sangat berharga"** - Every millisecond counts
+## Modules
 
-## 📦 Modules
+### 🗄️ [Cache](./cache/README.md)
+High-performance Redis caching utilities with connection pooling and error handling.
 
-### 🚀 [Cache Module](./cache/)
-High-performance Redis caching with optimized key generation and connection pooling.
+### 🐰 [RabbitMQ](./rabbitmq/README.md)
+Production-ready RabbitMQ client with auto-reconnect, publisher/consumer patterns, and robust error handling.
 
-**Key Features:**
-- **40% faster** key generation with custom zero-value checking
-- **97% faster** configuration loading with caching
-- Thread-safe connection pooling
-- Memory efficient operations
+## Installation
 
-**Quick Start:**
 ```bash
 go get github.com/xDaijobu/jobu-utils
 ```
 
+## Quick Start
+
+### Cache Example
 ```go
-import "github.com/xDaijobu/jobu-utils/cache"
+import "jobu-utils/cache"
 
-// Generate optimized cache key
-key := cache.Key(user, "users", "active")
+// Set a value
+err := cache.Set("user:123", "john_doe", 3600)
 
-// Store with expiration
-cache.SetJSON(key, user, 3600)
-
-// Retrieve and unmarshal
-var user User
-cache.GetUnmarshal(key, &user)
+// Get a value
+value, err := cache.Get("user:123")
 ```
 
-**[📖 Full Cache Documentation →](./cache/)**
+### RabbitMQ Publisher Example
+```go
+import (
+    "jobu-utils/rabbitmq"
+    "jobu-utils/rabbitmq/publisher"
+)
 
----
+route := &publisher.Route{
+    RouteConfig: rabbitmq.RouteConfig{
+        ExchangeName: "user-events",
+        ExchangeType: "direct",
+        RoutingKey:   "user.created",
+        QueueName:    "user-processor",
+    },
+}
 
-## 🚀 Installation
-
-```bash
-go get github.com/xDaijobu/jobu-utils
+err := route.Publish(&publisher.Publish{
+    Body: `{"user_id": "123", "action": "created"}`,
+})
 ```
 
-## 🎯 Design Philosophy
+### RabbitMQ Consumer Example
+```go
+import (
+    "jobu-utils/rabbitmq"
+    "jobu-utils/rabbitmq/consumer"
+)
 
-- **Performance First**: Every operation optimized for speed and memory efficiency
-- **Production Ready**: Thread-safe, well-tested, and battle-tested
-- **Developer Friendly**: Simple APIs with comprehensive documentation
-- **Modular**: Use only what you need
+route := &consumer.ConsumerRoute{
+    RouteConfig: rabbitmq.RouteConfig{
+        ExchangeName: "user-events",
+        ExchangeType: "direct",
+        RoutingKey:   "user.created",
+        QueueName:    "user-processor",
+    },
+    ConsumerTag: "user-service",
+    AutoAck:     false,
+}
 
-## 🧪 Testing
+handler := func(delivery amqp.Delivery) error {
+    log.Printf("Processing: %s", string(delivery.Body))
+    // Your business logic here
+    return nil
+}
 
-```bash
-# Test all modules
-go test ./... -v
-
-# Test with coverage
-go test ./... -cover -v
-
-# Run benchmarks
-go test ./... -bench=. -benchmem -v
+err := route.StartConsuming(handler)
 ```
 
-## 📊 Performance Focus
+## Features
 
-All modules are built with performance in mind:
-- Extensive benchmarking and optimization
-- Memory allocation minimization
-- Efficient algorithms and data structures
-- Thread-safe concurrent operations
+- ✅ **Production Ready**: Battle-tested utilities with proper error handling
+- ✅ **Auto-Reconnect**: Automatic reconnection for network failures
+- ✅ **Thread-Safe**: Concurrent operations handled safely
+- ✅ **Configurable**: Flexible configuration options
+- ✅ **Logging**: Comprehensive logging for debugging and monitoring
+- ✅ **High Performance**: Optimized for production workloads
 
-## 🛠️ Development
+## Environment Variables
+
+### Cache (Redis)
+```bash
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=
+REDIS_DB=0
+```
+
+### RabbitMQ
+```bash
+RABBITMQ_HOST=localhost
+RABBITMQ_PORT=5672
+RABBITMQ_USER=guest
+RABBITMQ_PASSWORD=guest
+```
+
+## Docker Compose
+
+For development and testing:
 
 ```bash
-# Clone repository
-git clone https://github.com/xDaijobu/jobu-utils.git
-cd jobu-utils
-
-# Install dependencies
-go mod download
-
-# Start development services (Redis, etc.)
 docker-compose up -d
-
-# Run tests
-go test ./... -v
 ```
 
-## 🤝 Contributing
+This will start Redis and RabbitMQ instances for local development.
+
+## Testing
+
+```bash
+# Run all tests
+go test ./...
+
+# Run tests with coverage
+go test -cover ./...
+
+# Run specific module tests
+go test ./cache/...
+go test ./rabbitmq/...
+```
+
+## Benchmarks
+
+```bash
+# Run benchmarks
+go test -bench=. ./...
+
+# Run cache benchmarks
+go test -bench=. ./cache/
+
+# Run with memory profiling
+go test -bench=. -memprofile=mem.prof ./cache/
+```
+
+## Contributing
 
 1. Fork the repository
-2. Create your feature branch: `git checkout -b feature/amazing-feature`
-3. Add tests and benchmarks for new functionality
-4. Ensure all tests pass: `go test ./... -v`
-5. Commit your changes: `git commit -m 'Add amazing feature'`
-6. Push to the branch: `git push origin feature/amazing-feature`
-7. Open a Pull Request
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🔗 Links
+## Support
 
-- **Repository**: [github.com/xDaijobu/jobu-utils](https://github.com/xDaijobu/jobu-utils)
-- **Issues**: [Report Issues](https://github.com/xDaijobu/jobu-utils/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/xDaijobu/jobu-utils/discussions)
-
----
-
-**Built with ❤️ for high-performance Go applications**
+If you have any questions or issues, please open an issue on GitHub.
