@@ -1,4 +1,4 @@
-module jobu-utils
+module github.com/xDaijobu/jobu-utils
 
 go 1.25
 
