@@ -7,7 +7,7 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
-	"jobu-utils/rabbitmq"
+	"github.com/xDaijobu/jobu-utils/rabbitmq"
 )
 
 // Publisher represents a RabbitMQ publisher

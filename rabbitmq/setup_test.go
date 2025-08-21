@@ -226,8 +226,8 @@ func getTestChannel(t *testing.T) (*amqp.Channel, error) {
 	// Set hardcoded environment variables for the test
 	os.Setenv("RABBITMQ_HOST", "localhost")
 	os.Setenv("RABBITMQ_PORT", "5672")
-	os.Setenv("RABBITMQ_USER", "admin")
-	os.Setenv("RABBITMQ_PASSWORD", "password")
+	os.Setenv("RABBITMQ_USER", "guest")     // Default RabbitMQ username
+	os.Setenv("RABBITMQ_PASSWORD", "guest") // Default RabbitMQ password
 
 	manager := InitConnectionManager()
 	return manager.GetChannel()

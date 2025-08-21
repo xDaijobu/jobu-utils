@@ -1,21 +1,138 @@
-# RabbitMQ Module
+# RabbitMQ Utils
 
-Simple RabbitMQ client with auto-reconnection for Go applications.
+Simple RabbitMQ client library with auto-reconnection for Go applications.
 
 ## 🚀 Quick Start
 
-### 1. Setup Environment
+### Installation
 
-Create a `.env` file in your project root:
+```bash
+go get github.com/xDaijobu/jobu-utils/rabbitmq
+```
 
-```env
+### Environment Setup
+
+Set these environment variables (or create a `.env` file):
+
+```bash
 RABBITMQ_HOST=localhost
 RABBITMQ_PORT=5672
 RABBITMQ_USER=guest
 RABBITMQ_PASSWORD=guest
 ```
 
-### 2. Basic Usage
+## 📤 Publisher Example
+
+```go
+package main
+
+import (
+    "log"
+    
+    "github.com/xDaijobu/jobu-utils/rabbitmq"
+    "github.com/xDaijobu/jobu-utils/rabbitmq/publisher"
+    amqp "github.com/rabbitmq/amqp091-go"
+)
+
+func main() {
+    // Configure routing
+    config := &rabbitmq.RouteConfig{
+        ExchangeName: "user-events",
+        ExchangeType: "direct",
+        RoutingKey:   "user.created",
+        QueueName:    "user-notifications",
+    }
+    
+    // Create publisher
+    pub, err := publisher.NewPublisher(config)
+    if err != nil {
+        log.Fatal("Failed to create publisher:", err)
+    }
+    defer pub.Close()
+    
+    // Publish a message
+    message := &publisher.Message{
+        Body:        []byte(`{"user_id": "123", "event": "created"}`),
+        ContentType: "application/json",
+        Headers: amqp.Table{
+            "source": "user-service",
+        },
+    }
+    
+    err = pub.Publish(message)
+    if err != nil {
+        log.Fatal("Failed to publish:", err)
+    }
+    
+    log.Println("Message published successfully!")
+}
+```
+
+### Publisher Convenience Methods
+
+```go
+// Publish JSON
+err = pub.PublishJSON([]byte(`{"event": "user_created"}`))
+
+// Publish text
+err = pub.PublishText("Hello World!")
+
+// Publish with priority
+err = pub.PublishWithPriority([]byte(`{"urgent": true}`), 9)
+```
+
+## 📥 Consumer Example
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "time"
+    
+    "github.com/xDaijobu/jobu-utils/rabbitmq"
+    "github.com/xDaijobu/jobu-utils/rabbitmq/consumer"
+    amqp "github.com/rabbitmq/amqp091-go"
+)
+
+func main() {
+    // Configure routing
+    config := &rabbitmq.RouteConfig{
+        ExchangeName: "user-events",
+        ExchangeType: "direct",
+        RoutingKey:   "user.created",
+        QueueName:    "user-notifications",
+    }
+    
+    // Create consumer
+    cons, err := consumer.NewConsumer(config)
+    if err != nil {
+        log.Fatal("Failed to create consumer:", err)
+    }
+    defer cons.Close()
+    
+    // Define message handler
+    handler := func(msg amqp.Delivery) error {
+        log.Printf("Received message: %s", string(msg.Body))
+        
+        // Process message here
+        // Return error to reject and requeue message
+        return nil
+    }
+    
+    // Start consuming
+    ctx := context.Background()
+    err = cons.Consume(ctx, handler)
+    if err != nil {
+        log.Fatal("Failed to consume:", err)
+    }
+}
+```
+
+## 🔧 Advanced Usage
+
+### Direct Connection
 
 ```go
 package main
@@ -30,149 +147,83 @@ import (
 func main() {
     var mutex sync.Mutex
     
-    // Connect to RabbitMQ
+    // Get channel directly
     channel, err := rabbitmq.Start(&mutex)
     if err != nil {
         log.Fatal("Failed to connect:", err)
     }
     
-    log.Println("Connected to RabbitMQ!")
+    // Setup routing manually
+    config := &rabbitmq.RouteConfig{
+        ExchangeName: "my-exchange",
+        ExchangeType: "topic",
+        RoutingKey:   "events.*",
+        QueueName:    "my-queue",
+    }
     
-    // Clean up when done
+    err = rabbitmq.SetupRouting(channel, config)
+    if err != nil {
+        log.Fatal("Failed to setup routing:", err)
+    }
+    
+    // Use channel for custom operations
+    // ...
+    
+    // Clean up
     defer rabbitmq.InitConnectionManager().Close()
 }
 ```
 
-## 📖 Features
+### Exchange Types
 
-- **Auto-reconnection** - Automatically reconnects when connection is lost
-- **Environment variables** - Loads config from `.env` file
-- **Thread-safe** - Safe for concurrent use
-- **Connection pooling** - Reuses connections efficiently
+- **direct**: Messages routed by exact routing key match
+- **topic**: Messages routed by routing key patterns (wildcards: `*` and `#`)
+- **fanout**: Messages broadcasted to all bound queues
+- **headers**: Messages routed by header attributes
 
-## 🔧 Configuration
+## 🛠️ Configuration
 
-Configuration is done through environment variables:
+The library uses these environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RABBITMQ_HOST` | `localhost` | RabbitMQ server hostname |
+| `RABBITMQ_HOST` | `localhost` | RabbitMQ server host |
 | `RABBITMQ_PORT` | `5672` | RabbitMQ server port |
-| `RABBITMQ_USER` | `guest` | Username for authentication |
-| `RABBITMQ_PASSWORD` | `guest` | Password for authentication |
+| `RABBITMQ_USER` | `guest` | RabbitMQ username |
+| `RABBITMQ_PASSWORD` | `guest` | RabbitMQ password |
 
-## 📝 Examples
+## 🔄 Auto-Reconnection
 
-### Publisher Example
+The library automatically handles connection failures with:
 
-```go
-package main
+- **Exponential backoff**: Increasing delays between retry attempts
+- **Maximum retries**: Configurable retry limit (default: 5)
+- **Thread-safe**: Safe for concurrent access
 
-import (
-    "log"
-    "sync"
-    
-    "github.com/xDaijobu/jobu-utils/rabbitmq"
-    "github.com/xDaijobu/jobu-utils/rabbitmq/publisher"
-)
+## 🧪 Testing
 
-func main() {
-    var mutex sync.Mutex
-    
-    // Connect to RabbitMQ
-    channel, err := rabbitmq.Start(&mutex)
-    if err != nil {
-        log.Fatal("Failed to connect:", err)
-    }
-    
-    // Configure exchange
-    config := &rabbitmq.RouteConfig{
-        ExchangeName: "my-exchange",
-        ExchangeType: "direct",
-        RoutingKey:   "my.routing.key",
-        QueueName:    "my-queue",
-    }
-    
-    // Create publisher
-    pub, err := publisher.NewExchange(channel, config)
-    if err != nil {
-        log.Fatal("Failed to create publisher:", err)
-    }
-    
-    // Publish a message
-    err = pub.Publish([]byte("Hello World!"))
-    if err != nil {
-        log.Fatal("Failed to publish message:", err)
-    }
-    
-    log.Println("Message published successfully!")
-    
-    // Clean up
-    rabbitmq.InitConnectionManager().Close()
-}
+Run unit tests:
+```bash
+go test ./rabbitmq/...
 ```
 
-### Consumer Example
-
-```go
-package main
-
-import (
-    "log"
-    "sync"
-    
-    "github.com/xDaijobu/jobu-utils/rabbitmq"
-    "github.com/xDaijobu/jobu-utils/rabbitmq/consumer"
-)
-
-func main() {
-    var mutex sync.Mutex
-    
-    // Connect to RabbitMQ
-    channel, err := rabbitmq.Start(&mutex)
-    if err != nil {
-        log.Fatal("Failed to connect:", err)
-    }
-    
-    // Configure exchange and queue
-    config := &rabbitmq.RouteConfig{
-        ExchangeName: "my-exchange",
-        ExchangeType: "direct",
-        RoutingKey:   "my.routing.key",
-        QueueName:    "my-queue",
-    }
-    
-    // Create consumer
-    cons, err := consumer.NewExchange(channel, config)
-    if err != nil {
-        log.Fatal("Failed to create consumer:", err)
-    }
-    
-    // Start consuming messages
-    messages, err := cons.Consume()
-    if err != nil {
-        log.Fatal("Failed to start consuming:", err)
-    }
-    
-    log.Println("Waiting for messages...")
-    
-    // Process messages
-    for msg := range messages {
-        log.Printf("Received message: %s", msg.Body)
-        msg.Ack(false) // Acknowledge the message
-    }
-    
-    // Clean up
-    rabbitmq.InitConnectionManager().Close()
-}
+Run integration tests (requires RabbitMQ):
+```bash
+go test ./rabbitmq/... -v
 ```
 
-## 🏗️ Installation
+## 📦 Dependencies
+
+- `github.com/rabbitmq/amqp091-go` - RabbitMQ client library
+
+## 🔗 Usage in Other Projects
 
 ```bash
-go get github.com/xDaijobu/jobu-utils
+go get github.com/xDaijobu/jobu-utils/rabbitmq
 ```
 
-## 📚 License
-
-MIT
+```go
+import "github.com/xDaijobu/jobu-utils/rabbitmq"
+import "github.com/xDaijobu/jobu-utils/rabbitmq/publisher"
+import "github.com/xDaijobu/jobu-utils/rabbitmq/consumer"
+```

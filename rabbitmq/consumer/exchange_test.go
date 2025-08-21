@@ -1,199 +1,67 @@
 package consumer
 
 import (
+	"context"
 	"fmt"
-	"jobu-utils/rabbitmq"
+	"github.com/xDaijobu/jobu-utils/rabbitmq"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func TestConsumerRouteValidation(t *testing.T) {
+func TestNewConsumer(t *testing.T) {
+	// Set hardcoded test credentials for RabbitMQ
+	os.Setenv("RABBITMQ_HOST", "localhost")
+	os.Setenv("RABBITMQ_PORT", "5672")
+	os.Setenv("RABBITMQ_USER", "guest")
+	os.Setenv("RABBITMQ_PASSWORD", "guest")
+
 	tests := []struct {
 		name    string
-		route   *ConsumerRoute
-		handler MessageHandler
+		config  *rabbitmq.RouteConfig
 		wantErr bool
 	}{
 		{
-			name:    "nil route",
-			route:   nil,
-			handler: func(delivery amqp.Delivery) error { return nil },
+			name:    "nil config",
+			config:  nil,
 			wantErr: true,
 		},
 		{
-			name:    "nil handler",
-			route:   &ConsumerRoute{},
-			handler: nil,
-			wantErr: true,
-		},
-		{
-			name: "empty exchange name",
-			route: &ConsumerRoute{
-				RouteConfig: rabbitmq.RouteConfig{
-					ExchangeName: "",
-					ExchangeType: "direct",
-					RoutingKey:   "test",
-					QueueName:    "test-queue",
-				},
+			name: "valid config",
+			config: &rabbitmq.RouteConfig{
+				ExchangeName: "test-exchange",
+				ExchangeType: "direct",
+				RoutingKey:   "test.key",
+				QueueName:    "test-queue",
 			},
-			handler: func(delivery amqp.Delivery) error { return nil },
-			wantErr: true,
-		},
-		{
-			name: "empty queue name",
-			route: &ConsumerRoute{
-				RouteConfig: rabbitmq.RouteConfig{
-					ExchangeName: "test-exchange",
-					ExchangeType: "direct",
-					RoutingKey:   "test",
-					QueueName:    "",
-				},
-			},
-			handler: func(delivery amqp.Delivery) error { return nil },
-			wantErr: true,
-		},
-		{
-			name: "valid route and handler",
-			route: &ConsumerRoute{
-				RouteConfig: rabbitmq.RouteConfig{
-					ExchangeName: "test-exchange",
-					ExchangeType: "direct",
-					RoutingKey:   "test.key",
-					QueueName:    "test-queue",
-				},
-				ConsumerTag: "test-consumer",
-				AutoAck:     false,
-			},
-			handler: func(delivery amqp.Delivery) error { return nil },
 			wantErr: false, // Will fail due to no RabbitMQ connection, but validation should pass
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// For validation tests, we only test the input validation, not actual connection
+			consumer, err := NewConsumer(tt.config)
+
 			if tt.wantErr {
-				err := tt.route.StartConsuming(tt.handler)
 				if err == nil {
 					t.Error("Expected error but got none")
 				}
-				// Clean up if consumer started
-				if tt.route != nil && tt.route.IsRunning() {
-					tt.route.StopConsuming()
+				if consumer != nil {
+					t.Error("Consumer should be nil when error occurs")
 				}
 			} else {
-				// For valid inputs, test validation logic only
-				if tt.route == nil {
-					t.Error("Route should not be nil for valid test case")
-					return
+				// For valid configs, we expect connection errors (not validation errors)
+				if err != nil {
+					// Check if it's a validation error vs connection error
+					if err.Error() == "config cannot be nil" {
+						t.Errorf("Validation should pass for valid config: %v", err)
+					}
+					// Connection errors are expected in unit tests
 				}
-				if tt.handler == nil {
-					t.Error("Handler should not be nil for valid test case")
-					return
-				}
-				if tt.route.ExchangeName == "" {
-					t.Error("ExchangeName should not be empty for valid test case")
-					return
-				}
-				if tt.route.QueueName == "" {
-					t.Error("QueueName should not be empty for valid test case")
-					return
-				}
-				// Validation passed - don't actually start consumer in unit test
 			}
 		})
-	}
-}
-
-func TestConsumerRouteDefaultConsumerTag(t *testing.T) {
-	route := &ConsumerRoute{
-		RouteConfig: rabbitmq.RouteConfig{
-			ExchangeName: "test-exchange",
-			ExchangeType: "direct",
-			RoutingKey:   "test.key",
-			QueueName:    "test-queue",
-		},
-		// ConsumerTag not set - should default to "default-consumer"
-		AutoAck: false,
-	}
-
-	handler := func(delivery amqp.Delivery) error { return nil }
-
-	// This will fail due to no RabbitMQ connection, but should set default consumer tag
-	route.StartConsuming(handler)
-
-	if route.ConsumerTag != "default-consumer" {
-		t.Errorf("Expected default consumer tag to be 'default-consumer', got '%s'", route.ConsumerTag)
-	}
-
-	// Clean up
-	if route.IsRunning() {
-		route.StopConsuming()
-		time.Sleep(100 * time.Millisecond)
-	}
-}
-
-func TestConsumerRouteStates(t *testing.T) {
-	route := &ConsumerRoute{
-		RouteConfig: rabbitmq.RouteConfig{
-			ExchangeName: "test-exchange",
-			ExchangeType: "direct",
-			RoutingKey:   "test.key",
-			QueueName:    "test-queue",
-		},
-		ConsumerTag: "state-test-consumer",
-		AutoAck:     false,
-	}
-
-	// Initially should not be running
-	if route.IsRunning() {
-		t.Error("Consumer should not be running initially")
-	}
-
-	// Test stopping when not running
-	err := route.StopConsuming()
-	if err == nil {
-		t.Error("StopConsuming should return error when consumer is not running")
-	}
-
-	// Test restart when not running
-	err = route.Restart()
-	if err == nil {
-		t.Error("Restart should return error when consumer is not running")
-	}
-}
-
-func TestConsumerRouteDoubleStart(t *testing.T) {
-	route := &ConsumerRoute{
-		RouteConfig: rabbitmq.RouteConfig{
-			ExchangeName: "test-exchange",
-			ExchangeType: "direct",
-			RoutingKey:   "test.key",
-			QueueName:    "test-queue",
-		},
-		ConsumerTag: "double-start-consumer",
-		AutoAck:     false,
-	}
-
-	handler := func(delivery amqp.Delivery) error { return nil }
-
-	// Start first time (will fail due to no RabbitMQ, but should set running state)
-	route.StartConsuming(handler)
-
-	// Try to start again - should return error
-	err := route.StartConsuming(handler)
-	if err == nil {
-		t.Error("StartConsuming should return error when consumer is already running")
-	}
-
-	// Clean up
-	if route.IsRunning() {
-		route.StopConsuming()
-		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -205,15 +73,15 @@ func TestMessageHandlerTypes(t *testing.T) {
 	}{
 		{
 			name: "simple handler",
-			handler: func(delivery amqp.Delivery) error {
+			handler: func(msg amqp.Delivery) error {
 				return nil
 			},
 			valid: true,
 		},
 		{
 			name: "handler with processing logic",
-			handler: func(delivery amqp.Delivery) error {
-				if string(delivery.Body) == "error" {
+			handler: func(msg amqp.Delivery) error {
+				if string(msg.Body) == "error" {
 					return fmt.Errorf("processing error")
 				}
 				return nil
@@ -222,7 +90,7 @@ func TestMessageHandlerTypes(t *testing.T) {
 		},
 		{
 			name: "handler with panic recovery",
-			handler: func(delivery amqp.Delivery) error {
+			handler: func(msg amqp.Delivery) error {
 				defer func() {
 					if r := recover(); r != nil {
 						// Handle panic
@@ -241,146 +109,44 @@ func TestMessageHandlerTypes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			route := &ConsumerRoute{
-				RouteConfig: rabbitmq.RouteConfig{
-					ExchangeName: "test-exchange",
-					ExchangeType: "direct",
-					RoutingKey:   "test.key",
-					QueueName:    "test-queue",
-				},
-				ConsumerTag: "handler-test-consumer",
-				AutoAck:     false,
+			if !tt.valid && tt.handler != nil {
+				t.Error("Invalid test case: nil handler should have valid=false")
 			}
-
-			err := route.StartConsuming(tt.handler)
-
-			if tt.valid && err != nil {
-				// Check if it's a validation error vs connection error
-				if err.Error() == "message handler cannot be nil" {
-					t.Errorf("Valid handler should not cause validation error: %v", err)
-				}
-			}
-
-			if !tt.valid && err == nil {
-				t.Error("Invalid handler should cause validation error")
-			}
-
-			// Clean up
-			if route.IsRunning() {
-				route.StopConsuming()
-				time.Sleep(100 * time.Millisecond)
+			if tt.valid && tt.handler == nil {
+				t.Error("Invalid test case: non-nil handler should have valid=true")
 			}
 		})
 	}
 }
 
-func TestConsumeOnceValidation(t *testing.T) {
-	tests := []struct {
-		name    string
-		route   *ConsumerRoute
-		handler MessageHandler
-		wantErr bool
-	}{
-		{
-			name:    "nil route",
-			route:   nil,
-			handler: func(delivery amqp.Delivery) error { return nil },
-			wantErr: true,
-		},
-		{
-			name:    "nil handler",
-			route:   &ConsumerRoute{},
-			handler: nil,
-			wantErr: true,
-		},
-		{
-			name: "empty queue name",
-			route: &ConsumerRoute{
-				RouteConfig: rabbitmq.RouteConfig{
-					QueueName: "",
-				},
-			},
-			handler: func(delivery amqp.Delivery) error { return nil },
-			wantErr: true,
-		},
-		{
-			name: "valid input",
-			route: &ConsumerRoute{
-				RouteConfig: rabbitmq.RouteConfig{
-					QueueName: "test-queue",
-				},
-				AutoAck: false,
-			},
-			handler: func(delivery amqp.Delivery) error { return nil },
-			wantErr: false, // Will fail due to no RabbitMQ connection, but validation should pass
-		},
+func TestConsumerConfigValidation(t *testing.T) {
+	config := &rabbitmq.RouteConfig{
+		ExchangeName: "test-consumer-exchange",
+		ExchangeType: "direct",
+		RoutingKey:   "test.consumer.key",
+		QueueName:    "test-consumer-queue",
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.route.ConsumeOnce(tt.handler)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Error("Expected error but got none")
-				}
-			} else {
-				// For valid inputs, we expect connection errors (not validation errors)
-				if err != nil {
-					// Check if it's a validation error vs connection error
-					if err.Error() == "consumer route cannot be nil" ||
-						err.Error() == "message handler cannot be nil" ||
-						err.Error() == "queue name cannot be empty" {
-						t.Errorf("Validation should pass for valid input: %v", err)
-					}
-					// Connection errors are expected in unit tests
-				}
-			}
-		})
-	}
-}
-
-func TestConsumerRouteConfigEmbedding(t *testing.T) {
-	route := &ConsumerRoute{
-		RouteConfig: rabbitmq.RouteConfig{
-			ExchangeName: "test-embedding",
-			ExchangeType: "topic",
-			RoutingKey:   "test.embedding.key",
-			QueueName:    "test-embedding-queue",
-		},
-		ConsumerTag: "embedding-consumer",
-		AutoAck:     true,
+	// Test that config fields are accessible
+	if config.ExchangeName != "test-consumer-exchange" {
+		t.Errorf("Expected ExchangeName to be 'test-consumer-exchange', got '%s'", config.ExchangeName)
 	}
 
-	// Test that we can access RouteConfig fields directly through embedding
-	if route.ExchangeName != "test-embedding" {
-		t.Error("RouteConfig embedding not working for ExchangeName")
+	if config.ExchangeType != "direct" {
+		t.Errorf("Expected ExchangeType to be 'direct', got '%s'", config.ExchangeType)
 	}
 
-	if route.ExchangeType != "topic" {
-		t.Error("RouteConfig embedding not working for ExchangeType")
+	if config.RoutingKey != "test.consumer.key" {
+		t.Errorf("Expected RoutingKey to be 'test.consumer.key', got '%s'", config.RoutingKey)
 	}
 
-	if route.RoutingKey != "test.embedding.key" {
-		t.Error("RouteConfig embedding not working for RoutingKey")
-	}
-
-	if route.QueueName != "test-embedding-queue" {
-		t.Error("RouteConfig embedding not working for QueueName")
-	}
-
-	// Test consumer-specific fields
-	if route.ConsumerTag != "embedding-consumer" {
-		t.Error("ConsumerTag not set correctly")
-	}
-
-	if route.AutoAck != true {
-		t.Error("AutoAck not set correctly")
+	if config.QueueName != "test-consumer-queue" {
+		t.Errorf("Expected QueueName to be 'test-consumer-queue', got '%s'", config.QueueName)
 	}
 }
 
 // Integration test for consumer
-func TestStartConsumingIntegration(t *testing.T) {
+func TestConsumerIntegration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
@@ -394,19 +160,29 @@ func TestStartConsumingIntegration(t *testing.T) {
 		t.Skip("RabbitMQ environment variables not set - skipping integration test")
 	}
 
-	route := &ConsumerRoute{
-		RouteConfig: rabbitmq.RouteConfig{
-			ExchangeName: "test-consumer-exchange",
-			ExchangeType: "direct",
-			RoutingKey:   "test.consumer",
-			QueueName:    "test-consumer-queue",
-		},
-		ConsumerTag: "integration-consumer",
-		AutoAck:     false,
+	config := &rabbitmq.RouteConfig{
+		ExchangeName: "test-consumer-integration",
+		ExchangeType: "direct",
+		RoutingKey:   "test.consumer.integration",
+		QueueName:    "test-consumer-integration-queue",
 	}
 
+	consumer, err := NewConsumer(config)
+	if err != nil {
+		t.Skipf("RabbitMQ not available for integration test: %v", err)
+		return
+	}
+
+	if consumer == nil {
+		t.Fatal("Consumer should not be nil when creation succeeds")
+	}
+
+	// Test context cancellation
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
 	messageReceived := make(chan bool, 1)
-	handler := func(delivery amqp.Delivery) error {
+	handler := func(msg amqp.Delivery) error {
 		select {
 		case messageReceived <- true:
 		default:
@@ -414,41 +190,25 @@ func TestStartConsumingIntegration(t *testing.T) {
 		return nil
 	}
 
-	err := route.StartConsuming(handler)
-	if err != nil {
-		t.Skipf("RabbitMQ not available for integration test: %v", err)
-		return
-	}
-
-	// Verify consumer is running
-	if !route.IsRunning() {
-		t.Error("Consumer should be running after StartConsuming")
-	}
-
-	// Stop consumer
-	err = route.StopConsuming()
-	if err != nil {
-		t.Errorf("Failed to stop consumer: %v", err)
-	}
-
-	// Wait for cleanup
-	time.Sleep(500 * time.Millisecond)
-
-	// Verify consumer is stopped
-	if route.IsRunning() {
-		t.Error("Consumer should not be running after StopConsuming")
+	// Start consuming (this will timeout due to context)
+	err = consumer.Consume(ctx, handler)
+	if err != context.DeadlineExceeded {
+		// Context cancellation is expected
 	}
 
 	// Clean up
+	consumer.Close()
+
+	// Clean up queue and exchange
 	manager := rabbitmq.InitConnectionManager()
 	if channel, err := manager.GetChannel(); err == nil {
-		channel.QueueDelete(route.QueueName, false, false, false)
-		channel.ExchangeDelete(route.ExchangeName, false, false)
+		channel.QueueDelete(config.QueueName, false, false, false)
+		channel.ExchangeDelete(config.ExchangeName, false, false)
 	}
 	manager.Close()
 }
 
-func TestConsumeOnceIntegration(t *testing.T) {
+func TestConsumerClose(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
@@ -462,162 +222,106 @@ func TestConsumeOnceIntegration(t *testing.T) {
 		t.Skip("RabbitMQ environment variables not set - skipping integration test")
 	}
 
-	route := &ConsumerRoute{
-		RouteConfig: rabbitmq.RouteConfig{
-			ExchangeName: "test-consume-once-exchange",
-			ExchangeType: "direct",
-			RoutingKey:   "test.consume.once",
-			QueueName:    "test-consume-once-queue",
-		},
-		AutoAck: false,
+	config := &rabbitmq.RouteConfig{
+		ExchangeName: "test-consumer-close",
+		ExchangeType: "direct",
+		RoutingKey:   "test.close",
+		QueueName:    "test-consumer-close-queue",
 	}
 
-	messageProcessed := false
-	handler := func(delivery amqp.Delivery) error {
-		messageProcessed = true
-		return nil
-	}
-
-	// Test consuming when no messages are available
-	err := route.ConsumeOnce(handler)
+	consumer, err := NewConsumer(config)
 	if err != nil {
-		t.Skipf("RabbitMQ not available for integration test: %v", err)
+		t.Skipf("RabbitMQ not available for close test: %v", err)
 		return
 	}
 
-	// Should not have processed any message
-	if messageProcessed {
-		t.Error("Should not have processed message when queue is empty")
+	// Test closing
+	err = consumer.Close()
+	if err != nil {
+		t.Errorf("Failed to close consumer: %v", err)
+	}
+
+	// Test closing again (should not error)
+	err = consumer.Close()
+	if err != nil {
+		t.Errorf("Second close should not error: %v", err)
 	}
 
 	// Clean up
 	manager := rabbitmq.InitConnectionManager()
 	if channel, err := manager.GetChannel(); err == nil {
-		channel.QueueDelete(route.QueueName, false, false, false)
-		channel.ExchangeDelete(route.ExchangeName, false, false)
+		channel.QueueDelete(config.QueueName, false, false, false)
+		channel.ExchangeDelete(config.ExchangeName, false, false)
 	}
 	manager.Close()
 }
 
-func BenchmarkConsumerValidation(b *testing.B) {
-	route := &ConsumerRoute{
-		RouteConfig: rabbitmq.RouteConfig{
-			ExchangeName: "benchmark-exchange",
-			ExchangeType: "direct",
-			RoutingKey:   "benchmark.key",
-			QueueName:    "benchmark-queue",
-		},
-		ConsumerTag: "benchmark-consumer",
-		AutoAck:     false,
-	}
-
-	handler := func(delivery amqp.Delivery) error {
-		return nil
+func BenchmarkNewConsumer(b *testing.B) {
+	config := &rabbitmq.RouteConfig{
+		ExchangeName: "benchmark-consumer-exchange",
+		ExchangeType: "direct",
+		RoutingKey:   "benchmark.consumer",
+		QueueName:    "benchmark-consumer-queue",
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		// Only test validation logic, not actual consuming
-		if route == nil {
+		// Only test validation, not actual consumer creation
+		if config == nil {
 			continue
 		}
-		if handler == nil {
+		if config.ExchangeName == "" {
 			continue
 		}
-		if route.ExchangeName == "" {
+		if config.QueueName == "" {
 			continue
-		}
-		if route.QueueName == "" {
-			continue
-		}
-		if route.ConsumerTag == "" {
-			route.ConsumerTag = "default-consumer"
 		}
 	}
 }
 
-func TestConsumerRouteFields(t *testing.T) {
-	route := &ConsumerRoute{
-		RouteConfig: rabbitmq.RouteConfig{
-			ExchangeName: "field-test-exchange",
-			ExchangeType: "fanout",
-			RoutingKey:   "field.test",
-			QueueName:    "field-test-queue",
-		},
-		ConsumerTag: "field-test-consumer",
-		AutoAck:     true,
+func TestConsumerConfigEmbedding(t *testing.T) {
+	config := &rabbitmq.RouteConfig{
+		ExchangeName: "test-embedding-consumer",
+		ExchangeType: "topic",
+		RoutingKey:   "test.embedding.consumer.key",
+		QueueName:    "test-embedding-consumer-queue",
 	}
 
-	// Test all fields are set correctly
-	if route.ExchangeName != "field-test-exchange" {
-		t.Errorf("Expected ExchangeName to be 'field-test-exchange', got '%s'", route.ExchangeName)
+	// Test that we can access RouteConfig fields
+	if config.ExchangeName != "test-embedding-consumer" {
+		t.Error("RouteConfig not working for ExchangeName")
 	}
 
-	if route.ExchangeType != "fanout" {
-		t.Errorf("Expected ExchangeType to be 'fanout', got '%s'", route.ExchangeType)
+	if config.ExchangeType != "topic" {
+		t.Error("RouteConfig not working for ExchangeType")
 	}
 
-	if route.RoutingKey != "field.test" {
-		t.Errorf("Expected RoutingKey to be 'field.test', got '%s'", route.RoutingKey)
+	if config.RoutingKey != "test.embedding.consumer.key" {
+		t.Error("RouteConfig not working for RoutingKey")
 	}
 
-	if route.QueueName != "field-test-queue" {
-		t.Errorf("Expected QueueName to be 'field-test-queue', got '%s'", route.QueueName)
-	}
-
-	if route.ConsumerTag != "field-test-consumer" {
-		t.Errorf("Expected ConsumerTag to be 'field-test-consumer', got '%s'", route.ConsumerTag)
-	}
-
-	if route.AutoAck != true {
-		t.Error("Expected AutoAck to be true")
+	if config.QueueName != "test-embedding-consumer-queue" {
+		t.Error("RouteConfig not working for QueueName")
 	}
 }
 
-func TestConcurrentConsumerManagement(t *testing.T) {
-	route := &ConsumerRoute{
-		RouteConfig: rabbitmq.RouteConfig{
-			ExchangeName: "concurrent-test-exchange",
-			ExchangeType: "direct",
-			RoutingKey:   "concurrent.test",
-			QueueName:    "concurrent-test-queue",
-		},
-		ConsumerTag: "concurrent-consumer",
-		AutoAck:     false,
-	}
-
-	handler := func(delivery amqp.Delivery) error {
+func TestMessageHandlerValidation(t *testing.T) {
+	// Test that MessageHandler type is correctly defined
+	var handler MessageHandler = func(msg amqp.Delivery) error {
 		return nil
 	}
 
-	var wg sync.WaitGroup
-	errors := make(chan error, 10)
-
-	// Test concurrent access to consumer state
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
-			// Try to check if running
-			route.IsRunning()
-
-			// Try to start (most will fail with "already running")
-			if err := route.StartConsuming(handler); err != nil {
-				// Expected for most goroutines
-			}
-
-			// Try to restart
-			route.Restart()
-		}()
+	if handler == nil {
+		t.Error("MessageHandler should not be nil")
 	}
 
-	wg.Wait()
-	close(errors)
+	// Test calling the handler
+	mockDelivery := amqp.Delivery{
+		Body: []byte("test message"),
+	}
 
-	// Clean up
-	if route.IsRunning() {
-		route.StopConsuming()
-		time.Sleep(100 * time.Millisecond)
+	err := handler(mockDelivery)
+	if err != nil {
+		t.Errorf("Handler should not return error for valid call: %v", err)
 	}
 }

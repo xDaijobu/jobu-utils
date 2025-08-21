@@ -132,8 +132,8 @@ func TestStartIntegration(t *testing.T) {
 	// Hardcoded test credentials for RabbitMQ instead of using environment variables
 	os.Setenv("RABBITMQ_HOST", "localhost")
 	os.Setenv("RABBITMQ_PORT", "5672")
-	os.Setenv("RABBITMQ_USER", "admin")        // Using test username
-	os.Setenv("RABBITMQ_PASSWORD", "password") // Using test password
+	os.Setenv("RABBITMQ_USER", "guest")     // Default RabbitMQ username
+	os.Setenv("RABBITMQ_PASSWORD", "guest") // Default RabbitMQ password
 
 	var m sync.Mutex
 	channel, err := Start(&m)
